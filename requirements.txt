@@ -1,4 +1,5 @@
 
 fastapi
 uvicorn[standard]
-instaloader
+instaloader==4.15.3
+
