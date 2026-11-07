@@ -1,5 +1,4 @@
-
 fastapi
 uvicorn[standard]
 instaloader==4.15.3
-
+instagrapi==3.2.0
