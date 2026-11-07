@@ -2,16 +2,15 @@
 import os
 import re
 from functools import lru_cache
-from typing import Optional
 
 import instaloader
-from fastapi import FastAPI, Header, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query
 from instaloader import Profile, Post
 
 app = FastAPI(
     title="Instagram Scraper API",
     description="API untuk mengambil metadata post dan jumlah followers Instagram menggunakan Instaloader.",
-    version="1.3.0",
+    version="1.4.0",
 )
 
 SESSION_FILE = os.getenv("IG_SESSION_FILE", "ig_session")
@@ -23,12 +22,7 @@ def home():
         "success": True,
         "message": "Instagram Scraper API is running",
         "version": app.version,
-        "endpoints": [
-            "/health",
-            "/post",
-            "/followers",
-            "/docs"
-        ],
+        "endpoints": ["/health", "/post", "/followers", "/docs"],
     }
 
 
@@ -37,25 +31,10 @@ def health():
     return {"success": True, "status": "healthy"}
 
 
-def check_api_key(x_api_key: Optional[str]) -> None:
-    expected = os.getenv("API_KEY")
-
-    if not expected:
-        raise HTTPException(
-            status_code=503,
-            detail="API_KEY belum dikonfigurasi pada environment Wasmer.",
-        )
-
-    if not x_api_key or x_api_key != expected:
-        raise HTTPException(
-            status_code=401,
-            detail="API key tidak valid."
-        )
-
-
 @lru_cache(maxsize=1)
 def get_instaloader() -> instaloader.Instaloader:
-    """Buat satu instance Instaloader untuk digunakan selama proses berjalan."""
+    """Membuat satu instance Instaloader dengan login opsional."""
+
     loader = instaloader.Instaloader(
         quiet=True,
         download_pictures=False,
@@ -69,6 +48,7 @@ def get_instaloader() -> instaloader.Instaloader:
     username = os.getenv("IG_USERNAME")
     password = os.getenv("IG_PASSWORD")
 
+    # Gunakan session jika tersedia.
     if username and os.path.exists(SESSION_FILE):
         try:
             loader.load_session_from_file(
@@ -78,6 +58,8 @@ def get_instaloader() -> instaloader.Instaloader:
         except Exception:
             pass
 
+    # Login hanya jika username dan password dikonfigurasi.
+    # Jika tidak ada, Instaloader berjalan tanpa login.
     if username and password and not loader.context.is_logged_in:
         loader.login(username, password)
         loader.save_session_to_file(filename=SESSION_FILE)
@@ -91,7 +73,7 @@ def validate_username(username: str) -> str:
     if not re.fullmatch(r"[A-Za-z0-9._]{1,30}", clean):
         raise HTTPException(
             status_code=400,
-            detail="Format username tidak valid."
+            detail="Format username Instagram tidak valid."
         )
 
     return clean
@@ -99,9 +81,12 @@ def validate_username(username: str) -> str:
 
 @app.get("/post")
 def get_post(
-    url: str = Query(..., description="URL post atau Reel Instagram"),
+    url: str = Query(
+        ...,
+        description="URL post atau Reel Instagram"
+    ),
 ):
-    """Mengambil metadata dasar dari satu post/Reel Instagram."""
+    """Mengambil metadata dasar dari satu post atau Reel Instagram."""
 
     match = re.search(
         r"instagram\.com/(?:p|reel|tv)/([A-Za-z0-9_-]+)",
@@ -112,7 +97,7 @@ def get_post(
     if not match:
         raise HTTPException(
             status_code=400,
-            detail="URL Instagram tidak valid. Gunakan URL /p/, /reel/, atau /tv/.",
+            detail="URL tidak valid. Gunakan URL /p/, /reel/, atau /tv/."
         )
 
     shortcode = match.group(1)
@@ -169,27 +154,13 @@ def get_followers_count(
         max_length=30,
         description="Username Instagram yang ingin diperiksa jumlah followers-nya"
     ),
-    x_api_key: Optional[str] = Header(
-        default=None,
-        alias="X-API-Key"
-    ),
 ):
     """Mengambil jumlah total followers berdasarkan username Instagram."""
 
-    check_api_key(x_api_key)
     clean_username = validate_username(username)
 
     try:
         loader = get_instaloader()
-
-        if not loader.context.is_logged_in:
-            raise HTTPException(
-                status_code=503,
-                detail=(
-                    "Login Instagram belum tersedia. Atur IG_USERNAME dan "
-                    "IG_PASSWORD pada environment Wasmer."
-                ),
-            )
 
         profile = Profile.from_username(
             loader.context,
